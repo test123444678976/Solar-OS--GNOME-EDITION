@@ -1,0 +1,43 @@
+name: Solar OS (LFS)
+on:
+  workflow_dispatch:
+    inputs:
+      stage:
+        description: "Fase a compilar (1 a 5)"
+        required: true
+        default: "1"
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 350          # limite do GitHub: 6h por job
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Libertar espaco e escolher disco
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          df -h / /mnt
+          if [ "$(df --output=avail /mnt | tail -1)" -gt "$(df --output=avail / | tail -1)" ]; then L=/mnt/lfs; else L=/lfs; fi
+          sudo mkdir -p "$L"
+          echo "LFS=$L" >> "$GITHUB_ENV"
+      - name: Dependencias do host
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential bison gawk texinfo m4 python3 patch xz-utils zstd wget curl gnupg \
+            rsync parted dosfstools e2fsprogs grub-pc-bin grub-efi-amd64-bin grub-common qemu-utils debian-archive-keyring
+          sudo ln -sf bash /bin/sh
+      - name: Restaurar fase anterior
+        if: ${{ inputs.stage != '1' }}
+        run: |
+          chmod +x ci/*.sh stages/*.sh
+          ./ci/fetch-stage.sh $(( ${{ inputs.stage }} - 1 ))
+      - name: Compilar fase ${{ inputs.stage }}
+        run: |
+          chmod +x ci/*.sh stages/*.sh
+          sudo -E ./stages/stage${{ inputs.stage }}.sh
+      - name: Publicar resultado
+        run: |
+          if [ "${{ inputs.stage }}" = "5" ]; then ./ci/publish-image.sh; else ./ci/pack-stage.sh ${{ inputs.stage }}; fi
